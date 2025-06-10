@@ -31,6 +31,10 @@ from models.common import (
     C3TR,
     SPP,
     SPPF,
+    C3k2,
+    C3k,
+    C2f,
+    A2C2f,
     Bottleneck,
     BottleneckCSP,
     C3Ghost,
@@ -354,6 +358,9 @@ def parse_model(d, ch):
             CrossConv,
             BottleneckCSP,
             C3,
+            C3k2,
+            C3k,
+            C2f,
             C3TR,
             C3SPP,
             C3Ghost,
@@ -368,7 +375,7 @@ def parse_model(d, ch):
                 c2 = make_divisible(c2 * gw, ch_mul)
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C3, C3TR, C3Ghost, C3x, MultiStreamC3}:
+            if m in {BottleneckCSP, C3, C3k, C3k2, C2f, C3TR, C3Ghost, C3x, MultiStreamC3}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:

@@ -163,19 +163,31 @@ class ComputeLoss:
                 if self.gr < 1:
                     iou = (1.0 - self.gr) + self.gr * iou
 
-                # If prediction is matched (iou > 0.5) with bounding box marked as ignore,
+                # If prediction is matched (iou > 0.5) with bounding box marked as not person (tcls[i] != 0),
                 # do not calculate objectness loss
-                ign_idx = (tcls[i] == -1) & (iou > self.hyp["iou_t"])
+                ign_idx = (tcls[i] != 0) & (iou > self.hyp["iou_t"])
                 keep = ~ign_idx
                 b, a, gj, gi, iou = b[keep], a[keep], gj[keep], gi[keep], iou[keep]
 
                 tobj[b, a, gj, gi] = iou  # iou ratio
 
-                # Classification
-                if self.nc > 1:  # cls loss (only if multiple classes)
-                    t = torch.full_like(pcls, self.cn, device=self.device)  # targets
-                    t[range(n), tcls[i]] = self.cp
-                    lcls += self.BCEcls(pcls, t)  # BCE
+                # # Classification
+                # if self.nc > 1:  # cls loss (only if multiple classes)
+                #     t = torch.full_like(pcls, self.cn, device=self.device)  # targets
+                #     t[range(n), tcls[i]] = self.cp
+                #     lcls += self.BCEcls(pcls, t)  # BCE
+
+                person_logits = pcls[..., 0]  # person logits
+                pos_mask = tcls[i] == 0  # positive mask for person class
+                neg_mask = ~pos_mask  # negative mask for non-person classes
+
+                if pos_mask.any():
+                    target_pos = torch.full_like(person_logits[pos_mask], self.cp, device=self.device)
+                    lcls += self.BCEcls(person_logits[pos_mask], target_pos)  # positive class loss
+                if neg_mask.any():
+                    target_neg = torch.full_like(person_logits[neg_mask], self.cn, device=self.device)
+                    lcls += self.BCEcls(person_logits[neg_mask], target_neg)
+                
 
                 # Append targets to text file
                 # with open('targets.txt', 'a') as file:

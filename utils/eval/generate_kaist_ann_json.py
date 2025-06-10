@@ -88,13 +88,17 @@ def convert_ann_xml2json(textListFile, xmlAnnDir, jsonAnnFile):
 
 def parse_opt():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--textListFile",   type=str, default='datasets/kaist-rgbt/val-D.txt',         help="Text file containing image file names (e.g., train-all-04.txt)")
+    parser.add_argument("--textListFile",   type=str, default='datasets/kaist-rgbt/val-1.txt',         help="Text file containing image file names (e.g., train-all-04.txt)")
     parser.add_argument("--xmlAnnDir",      type=str, default='datasets/kaist-rgbt/train/labels-xml',   help="XML annotation directory")
-    parser.add_argument("--jsonAnnFile",    type=str, default='utils/eval/KAIST_val-D_annotation.json',           help="Output json filename")
+    parser.add_argument("--jsonAnnFile",    type=str, default='utils/eval/KAIST_val-1_annotation.json',           help="Output json filename")
 
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse_opt()
-    convert_ann_xml2json(args.textListFile, args.xmlAnnDir, args.jsonAnnFile)
+    for i in range(1, 6):
+        textListFile = f'datasets/kaist-rgbt/val-split-{i}.txt'
+        jsonAnnFile = f'utils/eval/KAIST_val-split-{i}_annotation.json'
+        convert_ann_xml2json(textListFile, args.xmlAnnDir, jsonAnnFile)
+    # convert_ann_xml2json(args.textListFile, args.xmlAnnDir, args.jsonAnnFile)

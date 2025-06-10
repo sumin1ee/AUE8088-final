@@ -19,9 +19,9 @@ test: # test files info (optional)
 # Classes
 names:
   0: person
-  1: cyclist
-  2: people
-  3: person?
+  # 1: cyclist
+  # 2: people
+  # 3: person?
 
 # Download script/URL (optional) ---------------------------------------------------------------------------------------
 download: |

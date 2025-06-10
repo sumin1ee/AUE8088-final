@@ -113,10 +113,15 @@ def kmean_anchors(dataset="./data/coco128.yaml", n=9, img_size=640, thr=4.0, gen
     if isinstance(dataset, str):  # *.yaml file
         with open(dataset, errors="ignore") as f:
             data_dict = yaml.safe_load(f)  # model dict
-        from utils.dataloaders import LoadImagesAndLabels
+        from utils.dataloaders import LoadRGBTImagesAndLabels
+        root_path = data_dict.get("path")  # path to dataset
+        print(type(root_path), root_path)
+        train_txt = data_dict.get("train")[0]
+        print(type(train_txt), train_txt)
+        path = root_path + '/' + train_txt
 
-        dataset = LoadImagesAndLabels(data_dict["train"], augment=True, rect=True)
-
+        # dataset = LoadImagesAndLabels(data_dict["train"], augment=True, rect=True)
+        dataset = LoadRGBTImagesAndLabels(path, augment=True, rect=True, single_cls=True, cache_images=False)
     # Get label wh
     shapes = img_size * dataset.shapes / dataset.shapes.max(1, keepdims=True)
     wh0 = np.concatenate([l[:, 3:5] * s for s, l in zip(shapes, dataset.labels)])  # wh
@@ -169,3 +174,8 @@ def kmean_anchors(dataset="./data/coco128.yaml", n=9, img_size=640, thr=4.0, gen
                 print_results(k, verbose)
 
     return print_results(k).astype(np.float32)
+
+if __name__ == "__main__":
+    # Example usage
+    kmean_anchors(dataset="./data/kaist-rgbt.yaml", n=9, img_size=640, thr=6.0, gen=1000, verbose=True)
+
