@@ -224,23 +224,23 @@ class DetectionModel(BaseModel):
         # Build strides, anchors
         m = self.model[-1]  # Detect()
         if isinstance(m, (Detect,)):
-            try:
-                s = 256  # 2x min stride
-                m.inplace = self.inplace
-                m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
-                check_anchor_order(m)
-                m.anchors /= m.stride.view(-1, 1, 1)
-                self.stride = m.stride
-                self._initialize_biases()  # only run once
-            except:
+            # try:
+            #     s = 256  # 2x min stride
+            #     m.inplace = self.inplace
+            #     m.stride = torch.tensor([s / x.shape[-2] for x in self.forward(torch.zeros(1, ch, s, s))])  # forward
+            #     check_anchor_order(m)
+            #     m.anchors /= m.stride.view(-1, 1, 1)
+            #     self.stride = m.stride
+            #     self._initialize_biases()  # only run once
+            # except:
                 # For RGB+T input
-                s = 640  # 2x min stride
-                m.inplace = self.inplace
-                m.stride = torch.tensor([s / x.shape[-2] for x in self.forward([torch.zeros(1, ch, s, s), torch.zeros(1, ch, s, s)])])  # forward
-                check_anchor_order(m)
-                m.anchors /= m.stride.view(-1, 1, 1)
-                self.stride = m.stride
-                self._initialize_biases()  # only run once
+            s = 640  # 2x min stride
+            m.inplace = self.inplace
+            m.stride = torch.tensor([s / x.shape[-2] for x in self.forward([torch.zeros(1, ch, s, s), torch.zeros(1, ch, s, s)])])  # forward
+            check_anchor_order(m)
+            m.anchors /= m.stride.view(-1, 1, 1)
+            self.stride = m.stride
+            self._initialize_biases()  # only run once
 
 
         # Init weights, biases
@@ -361,6 +361,7 @@ def parse_model(d, ch):
             C3k2,
             C3k,
             C2f,
+            A2C2f,
             C3TR,
             C3SPP,
             C3Ghost,
@@ -375,7 +376,7 @@ def parse_model(d, ch):
                 c2 = make_divisible(c2 * gw, ch_mul)
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C3, C3k, C3k2, C2f, C3TR, C3Ghost, C3x, MultiStreamC3}:
+            if m in {BottleneckCSP, C3, C3k, C3k2, A2C2f, C2f, C3TR, C3Ghost, C3x, MultiStreamC3}:
                 args.insert(2, n)  # number of repeats
                 n = 1
         elif m is nn.BatchNorm2d:

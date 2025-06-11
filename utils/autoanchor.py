@@ -178,4 +178,3 @@ def kmean_anchors(dataset="./data/coco128.yaml", n=9, img_size=640, thr=4.0, gen
 if __name__ == "__main__":
     # Example usage
     kmean_anchors(dataset="./data/kaist-rgbt.yaml", n=9, img_size=640, thr=6.0, gen=1000, verbose=True)
-

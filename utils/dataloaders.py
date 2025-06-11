@@ -920,6 +920,7 @@ class LoadImagesAndLabels(Dataset):
             # Labels
             labels, segments = self.labels[index].copy(), self.segments[index].copy()
             if labels.size:
+                labels[:, 1:3] += labels[:, 3:5] / 2.0      # (x_lefttop, y_lefttop) -> (x_center, y_center)
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
             labels4.append(labels)
@@ -934,11 +935,12 @@ class LoadImagesAndLabels(Dataset):
         # Augment
         new_imgs = []
         for img4 in img4s:
-        # img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp["copy_paste"])
-            img4, labels4_aug = random_perspective(
+            img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp["copy_paste"])
+
+            img4, labels4 = random_perspective(
                 img4,
-                labels4.copy(),
-                segments4.copy(),
+                labels4,
+                segments4,
                 degrees=self.hyp["degrees"],
                 translate=self.hyp["translate"],
                 scale=self.hyp["scale"],
@@ -948,7 +950,7 @@ class LoadImagesAndLabels(Dataset):
             )  # border to remove
             new_imgs.append(img4)
 
-        return new_imgs, labels4_aug
+        return new_imgs, labels4
 
     def load_mosaic9(self, index):
         """Loads 1 image + 8 random images into a 9-image mosaic for augmented YOLOv5 training, returning labels and
@@ -1103,7 +1105,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
         super().__init__(path, **kwargs)
 
         # TODO: make mosaic augmentation work
-        self.mosaic = False
+        self.mosaic = True
 
         # Set ignore flag
         cond = self.ignore_settings['train' if is_train else 'test']
@@ -1212,12 +1214,29 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
 
             # TODO: Load mosaic
             imgs, labels = self.load_mosaic(index)
-            shapes = None
+            h0, w0 = imgs[0].shape[:2]  # original height and width
             
-            # TODO: MixUp augmentation
+            ratio = (1.0, 1.0)
+            pad   = (0.0, 0.0)
+
+            shapes =  ((h0, w0), (ratio, pad))
+            # # TODO: MixUp augmentation
             if random.random() < hyp["mixup"]:
                 imgs, labels = mixup(imgs, labels, *self.load_mosaic(random.choice(self.indices)))
+            
+            nl = len(labels)
+            labels_out = torch.zeros((nl, 7))
+            if nl:
+                labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=w0, h=h0, clip=True, eps=1e-3)
+                labels_out[:, 1:] = torch.from_numpy(labels)
 
+
+            for ii, img in enumerate(imgs):
+                img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+                img = np.ascontiguousarray(img)
+
+                imgs[ii] = torch.from_numpy(img)
+            
         else:
             # Load image
             # hw0s: original shapes, hw1s: resized shapes

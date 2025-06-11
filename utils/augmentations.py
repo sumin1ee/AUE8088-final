@@ -305,6 +305,13 @@ def mixup(im, labels, im2, labels2):
     See https://arxiv.org/pdf/1710.09412.pdf for details.
     """
     r = np.random.beta(32.0, 32.0)  # mixup ratio, alpha=beta=32.0
+
+    if isinstance(im, list) and isinstance(im2, list):
+        for i, img in enumerate(im):
+            im[i] = (img * r + im2[i] * (1 - r)).astype(np.uint8)
+        labels = np.concatenate((labels, labels2), 0)
+        return im, labels
+
     im = (im * r + im2 * (1 - r)).astype(np.uint8)
     labels = np.concatenate((labels, labels2), 0)
     return im, labels
