@@ -13,6 +13,9 @@ import os
 import platform
 import sys
 from copy import deepcopy
+import copy
+from typing import List, Tuple, Union
+
 from pathlib import Path
 
 import torch
@@ -26,6 +29,9 @@ if platform.system() != "Windows":
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 from models.common import (
+    DFL,
+    GSMA,
+    GMDBlock,
     C3,
     C3SPP,
     C3TR,
@@ -54,8 +60,13 @@ from models.common import (
     Proto,
     MultiStreamConv,
     MultiStreamC3,
+    MultiStreamC2f,
+    MultiStreamC3k2,
     MultiStreamMaxPool2d,
     Fusion,
+    GPT,
+    Add,
+    Add2
 )
 from models.experimental import MixConv2d
 from utils.autoanchor import check_anchor_order
@@ -187,11 +198,14 @@ class BaseModel(nn.Module):
         """
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect,)):
+        if isinstance(m, (Detect, )):
             m.stride = fn(m.stride)
             m.grid = list(map(fn, m.grid))
             if isinstance(m.anchor_grid, list):
                 m.anchor_grid = list(map(fn, m.anchor_grid))
+        elif isinstance(m, (NoAnchorDetect,)):
+            m.strides = fn(m.strides)
+            m.anchors = fn(m.anchors)
         return self
 
 
@@ -223,7 +237,7 @@ class DetectionModel(BaseModel):
 
         # Build strides, anchors
         m = self.model[-1]  # Detect()
-        if isinstance(m, (Detect,)):
+        if isinstance(m, (Detect, NoAnchorDetect, )):
             # try:
             #     s = 256  # 2x min stride
             #     m.inplace = self.inplace
@@ -236,10 +250,17 @@ class DetectionModel(BaseModel):
                 # For RGB+T input
             s = 640  # 2x min stride
             m.inplace = self.inplace
+            # dummy = torch.zeros(1, ch, s_img, s_img, device=next(self.parameters()).device)
+            # feat_shapes = self.forward([dummy, dummy]) if isinstance(dummy, list) else self.forward(dummy)
             m.stride = torch.tensor([s / x.shape[-2] for x in self.forward([torch.zeros(1, ch, s, s), torch.zeros(1, ch, s, s)])])  # forward
-            check_anchor_order(m)
-            m.anchors /= m.stride.view(-1, 1, 1)
+            # m.stride = torch.tensor([s_img / f.shape[-2] for f in feat_shapes]) 
             self.stride = m.stride
+            if isinstance(m, Detect):
+                check_anchor_order(m)
+                m.anchors /= m.stride.view(-1, 1, 1)
+            # check_anchor_order(m)
+            # m.anchors /= m.stride.view(-1, 1, 1)
+            # self.stride = m.stride
             self._initialize_biases()  # only run once
 
 
@@ -307,13 +328,14 @@ class DetectionModel(BaseModel):
         """
         # cf = torch.bincount(torch.tensor(np.concatenate(dataset.labels, 0)[:, 0]).long(), minlength=nc) + 1.
         m = self.model[-1]  # Detect() module
-        for mi, s in zip(m.m, m.stride):  # from
-            b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
-            b.data[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
-            b.data[:, 5 : 5 + m.nc] += (
-                math.log(0.6 / (m.nc - 0.99999)) if cf is None else torch.log(cf / cf.sum())
-            )  # cls
-            mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
+        if isinstance(m, Detect):
+            for mi, s in zip(m.m, m.stride):  # from
+                b = mi.bias.view(m.na, -1)  # conv.bias(255) to (3,85)
+                b.data[:, 4] += math.log(8 / (640 / s) ** 2)  # obj (8 objects per 640 image)
+                b.data[:, 5 : 5 + m.nc] += (
+                    math.log(0.6 / (m.nc - 0.99999)) if cf is None else torch.log(cf / cf.sum())
+                )  # cls
+                mi.bias = torch.nn.Parameter(b.view(-1), requires_grad=True)
 
 
 Model = DetectionModel  # retain YOLOv5 'Model' class for backwards compatibility
@@ -370,24 +392,43 @@ def parse_model(d, ch):
             C3x,
             MultiStreamConv,
             MultiStreamC3,
+            MultiStreamC3k2,
+            MultiStreamC2f,
         }:
             c1, c2 = ch[f], args[0]
             if c2 != no:  # if not output
                 c2 = make_divisible(c2 * gw, ch_mul)
 
             args = [c1, c2, *args[1:]]
-            if m in {BottleneckCSP, C3, C3k, C3k2, A2C2f, C2f, C3TR, C3Ghost, C3x, MultiStreamC3}:
+            if m in {BottleneckCSP, C3, C3k, C3k2, A2C2f, C2f, C3TR, C3Ghost, C3x, MultiStreamC3, MultiStreamC2f, MultiStreamC3k2}:
                 args.insert(2, n)  # number of repeats
                 n = 1
+        elif m in {GSMA, GMDBlock}:
+            if isinstance(f, (list, tuple)):
+                c2 = sum(ch[x] for x in f)
+            else:
+                c2 = ch[f] * 2
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+        elif m is Add:
+            # print("ch[f]", f, ch[f[0]])
+            c2 = ch[f[0]]
+            args = [c2]
+        elif m is Add2:
+            c2 = ch[f[0]]
+            args = [c2, args[1]]
+        elif m is GPT:
+            c2 = ch[f[0]]
+            args = [c2]
         # TODO: channel, gw, gd
-        elif m in {Detect,}:
+        elif m in {Detect, }:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
                 args[1] = [list(range(args[1] * 2))] * len(f)
+        elif m in {NoAnchorDetect, }:
+            args.append([ch[x] for x in f])
         elif m is Contract:
             c2 = ch[f] * args[0] ** 2
         elif m is Expand:

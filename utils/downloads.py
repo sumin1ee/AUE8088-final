@@ -134,3 +134,51 @@ def attempt_download(file, repo="ultralytics/yolov5", release="v7.0"):
             )
 
     return str(file)
+
+
+def attempt_download_v8(file, repo="ultralytics/assets", release="latest"):
+    def github_assets(repository: str, tag: str = "latest"):
+        """지정 repo 의 release (tag) 에 포함된 asset 목록 리턴"""
+        if tag != "latest":
+            tag = f"tags/{tag}"
+        r = requests.get(f"https://api.github.com/repos/{repository}/releases/{tag}").json()
+        return r["tag_name"], [a["name"] for a in r["assets"]]
+
+    file = Path(str(file).strip().replace("'", ""))
+
+    # 1) 이미 존재하면 바로 반환 ---------------------------------------------------
+    if file.exists():
+        return str(file)
+
+    # 2) URL 이 직접 들어왔을 때 ---------------------------------------------------
+    if is_url(file):
+        name = Path(urllib.parse.unquote(str(file))).name.split("?")[0]
+        safe_download(name, str(file), min_bytes=min_bytes)
+        return name
+
+    # 3) GitHub release 에서 다운로드 ----------------------------------------------
+    name = file.name
+    # v8 계열에서 흔히 쓰는 가중치 이름 패턴
+    common_assets = [
+        f"yolov8{sz}{suf}.pt"
+        for sz in ("n", "s", "m", "l", "x")
+        for suf in ("", "-seg", "-cls", "-pose")
+    ]
+
+    try:
+        tag, remote_assets = github_assets(repo, release)
+    except Exception as e:
+        LOGGER.warning(f"GitHub API 접속 실패: {e}")
+        remote_assets = []
+
+    # 요청 파일이 release 자산에 없더라도, common_assets 안에 있으면 진행
+    if (name in remote_assets) or (name in common_assets):
+        dest = file if file.suffix else file.with_suffix(".pt")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        url = f"https://github.com/{repo}/releases/download/{tag}/{name}"
+        safe_download(dest, url, min_bytes=min_bytes,
+                      error_msg=f"{name} 다운로드 실패. 수동으로 받아서 {dest} 위치에 두세요.")
+        return str(dest)
+
+    # 4) 여기까지 오면 찾을 수 없는 파일 --------------------------------------------
+    raise FileNotFoundError(f"❌ '{name}' 을(를) {repo} release 에서 찾지 못했습니다.")

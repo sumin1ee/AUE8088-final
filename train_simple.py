@@ -62,6 +62,7 @@ from utils.general import (
 )
 from utils.loggers import Loggers
 from utils.loss import ComputeLoss
+# from utils.loss2 import v8DetectionLoss
 from utils.metrics import fitness
 from utils.torch_utils import (
     EarlyStopping,
@@ -130,7 +131,7 @@ def train(hyp, opt, device, callbacks):
     data_dict = loggers.remote_dataset
 
     # Config
-    init_seeds(opt.seed, deterministic=True)
+    init_seeds(opt.seed, deterministic=True) 
     data_dict = data_dict or check_dataset(data)  # check if None
     # import ipdb; ipdb.set_trace()
     train_path, val_path = data_dict["train"], data_dict["val"]
@@ -149,6 +150,7 @@ def train(hyp, opt, device, callbacks):
         exclude = ["anchor"] if (cfg or hyp.get("anchors")) else []  # exclude keys
         csd = ckpt["model"].float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, model.state_dict(), exclude=exclude)  # intersect
+        print(f"Transferred {len(csd)}/{len(model.state_dict())} items from {weights}")  # report
         model.load_state_dict(csd, strict=False)  # load
         LOGGER.info(f"Transferred {len(csd)}/{len(model.state_dict())} items from {weights}")  # report
     else:
@@ -248,6 +250,7 @@ def train(hyp, opt, device, callbacks):
     scaler = torch.amp.GradScaler(enabled=amp)
     stopper, stop = EarlyStopping(patience=opt.patience), False
     compute_loss = ComputeLoss(model)  # init loss class
+    # compute_loss = v8DetectionLoss(model)  # init loss class
     callbacks.run("on_train_start")
     LOGGER.info(
         f'Image sizes {imgsz} train, {imgsz} val\n'

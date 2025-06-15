@@ -1,0 +1,74 @@
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
+
+# YOLO12 object detection model with P3/8 - P5/32 outputs
+# Model docs: https://docs.ultralytics.com/models/yolo12
+# Task docs: https://docs.ultralytics.com/tasks/detect
+
+# Parameters
+nc: 1 # number of classes
+depth_multiple: 0.50 # model depth multiple
+width_multiple: 0.50 # layer channel multiple
+
+# anchors:
+#   - [10, 13, 16, 30, 33, 23] # P3/8
+#   - [30, 61, 62, 45, 59, 119] # P4/16
+#   - [116, 90, 156, 198, 373, 326] # P5/32
+anchors:
+  - [21,41, 23,55, 32,67]        # P3/8
+  - [40,89, 47,113, 134,42]      # P4/16
+  - [60,145, 195,55, 83,208]     # P5/32
+
+# YOLO12n backbone
+backbone:
+  [
+    [-1, 1, MultiStreamConv,  [64, 6, 2, 2]],      # 0  P1/2
+    [-1, 1, MultiStreamConv,  [128, 3, 2]],         # 1  P2/4
+    [-1, 3, MultiStreamC3,    [128]],               # 2
+
+    # Early‑fusion : GMDBlock
+    [-1, 1, GMDBlock,      [128, 1.0]],         # 3  output 256 ch
+    [-1, 1, Conv,             [256, 1, 1]],         # 4  channel align
+
+    # Down‑sample & middle layers (P3)
+    [-1, 1, Conv,             [256, 3, 2]],         # 5  P3/8
+    [-1, 2, C3k2,             [256, False, 0.25]],  # 6
+
+    # P4
+    [-1, 1, Conv,             [512, 3, 2]],         # 7  P4/16
+    [-1, 2, C3k2,             [512, False, 0.25]],  # 8
+
+    # P5 stem
+    [-1, 1, Conv,             [512, 3, 2]],         # 9  P5/32
+
+    # GSMA @P5
+    [-1, 1, GSMA,             [512, 4, 4]],         # 10 (B,2048,··) -> fused
+    [-1, 1, Conv,             [1024, 1, 1]],        # 11 channel align
+    [-1, 4, A2C2f,            [1024, True, 1]],     # 12
+  ]
+
+# YOLO12n head
+head:
+  [
+    [-1, 1, nn.Upsample,      [None, 2, "nearest"]],
+    [[-1, 8], 1, GSMA,        [512, 4, 4]],          # 13 combine P5↑ with P4
+    [-1, 1, Conv,            [768, 1, 1]],           # 14 align ch (512+256)
+    [-1, 2, A2C2f,           [512, False, -1]],      # 15
+
+    # P4 → P3
+    [-1, 1, nn.Upsample,     [None, 2, "nearest"]],
+    [[-1, 6], 1, GSMA,       [256, 4, 4]],           # 16 combine P4↑ with P3
+    [-1, 1, Conv,           [512, 1, 1]],            # 17 align
+    [-1, 2, A2C2f,          [256, False, -1]],       # 18  (P3‑small)
+
+    # PAN bottom‑up
+    [-1, 1, Conv,           [256, 3, 2]],
+    [[-1, 15], 1, Concat,    [1]],                   # P4 fusion
+    [-1, 2, A2C2f,          [512, False, -1]],       # 21  (P4‑medium)
+
+    [-1, 1, Conv,           [512, 3, 2]],
+    [[-1, 12], 1, Concat,    [1]],                   # P5 fusion
+    [-1, 2, C3k2,           [1024, True]],           # 24  (P5‑large)
+
+    # Detect head
+    [[18, 21, 24], 1, Detect, [nc, anchors]],        # 25  Detect (P3,P4,P5)
+  ]

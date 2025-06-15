@@ -15,6 +15,7 @@ from multiprocessing.pool import Pool, ThreadPool
 from pathlib import Path
 from threading import Thread
 from urllib.parse import urlparse
+from tqdm import tqdm
 
 import numpy as np
 import psutil
@@ -35,6 +36,7 @@ from utils.augmentations import (
     letterbox,
     mixup,
     random_perspective,
+    multi_random_perspective,
 )
 from utils.general import (
     DATASETS_DIR,
@@ -896,7 +898,9 @@ class LoadImagesAndLabels(Dataset):
         for i, index in enumerate(indices):
             # Load image
             imgs, _, (hs, ws) = self.load_image(index) # img : list of images, _, (h, w) : original height and width
-            for m, img in enumerate(imgs):
+            # print(f'len imgs: {len(imgs)}')
+            # print(f'len imgs: {len(imgs)}, hs: {hs}, ws: {ws}')
+            for m, img in enumerate(imgs): 
                 h, w = img.shape[:2]
                 if i == 0:
                     # base = img4s[m]
@@ -923,6 +927,7 @@ class LoadImagesAndLabels(Dataset):
                 labels[:, 1:3] += labels[:, 3:5] / 2.0      # (x_lefttop, y_lefttop) -> (x_center, y_center)
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
+            
             labels4.append(labels)
             segments4.extend(segments)
 
@@ -933,24 +938,22 @@ class LoadImagesAndLabels(Dataset):
         # img4, labels4 = replicate(img4, labels4)  # replicate
 
         # Augment
-        new_imgs = []
-        for img4 in img4s:
-            img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp["copy_paste"])
+        # img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp["copy_paste"])
 
-            img4, labels4 = random_perspective(
-                img4,
-                labels4,
-                segments4,
-                degrees=self.hyp["degrees"],
-                translate=self.hyp["translate"],
-                scale=self.hyp["scale"],
-                shear=self.hyp["shear"],
-                perspective=self.hyp["perspective"],
-                border=self.mosaic_border,
-            )  # border to remove
-            new_imgs.append(img4)
+        img4s, labels4 = multi_random_perspective(
+            img4s,
+            labels4,
+            segments4,
+            degrees=self.hyp["degrees"],
+            translate=self.hyp["translate"],
+            scale=self.hyp["scale"],
+            shear=self.hyp["shear"],
+            perspective=self.hyp["perspective"],
+            border=self.mosaic_border,
+        )  # border to remove
 
-        return new_imgs, labels4
+
+        return img4s, labels4
 
     def load_mosaic9(self, index):
         """Loads 1 image + 8 random images into a 9-image mosaic for augmented YOLOv5 training, returning labels and
@@ -1094,7 +1097,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
 
     def __init__(self, path, **kwargs):
         # HACK: cannot guarantee that path contain split name
-        is_train = 'train' in path
+        is_train = 'train' in path[0]
         single_cls = kwargs['single_cls']
         kwargs['single_cls'] = False
         assert kwargs['cache_images'] != 'ram', 'Image caching for RGBT dataset is not implemented yet.'
@@ -1105,7 +1108,9 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
         super().__init__(path, **kwargs)
 
         # TODO: make mosaic augmentation work
-        self.mosaic = True
+        self.mosaic = is_train
+
+        print(f'self.mosaic : {self.mosaic}, is_train : {is_train}, path : {path}')
 
         # Set ignore flag
         cond = self.ignore_settings['train' if is_train else 'test']
@@ -1217,7 +1222,7 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
             h0, w0 = imgs[0].shape[:2]  # original height and width
             
             ratio = (1.0, 1.0)
-            pad   = (0.0, 0.0)
+            pad   = (0.0, 64.0)
 
             shapes =  ((h0, w0), (ratio, pad))
             # # TODO: MixUp augmentation
@@ -1307,6 +1312,74 @@ class LoadRGBTImagesAndLabels(LoadImagesAndLabels):
         # Drop occlusion level
         labels_out = labels_out[:, :-1]
         return imgs, labels_out, self.im_files[index], shapes, index
+
+    # def load_mosaic(self, index):
+    #     """Loads a 4-image mosaic for YOLOv5, combining 1 selected and 3 random images, with labels and segments."""
+    #     labels4, segments4 = [], []
+    #     s = self.img_size
+    #     yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y
+    #     indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
+    #     random.shuffle(indices)
+
+    #     n_mod = len(self.modalities) if hasattr(self, 'modalities') else 2  # default 2 modalities (lwir, visible)
+    #     img4s = [np.full((s*2, s*2, 3), 114, dtype=np.uint8) for _ in range(n_mod)]
+
+    #     for i, index in enumerate(indices):
+    #         # Load image
+    #         imgs, _, (hs, ws) = self.load_image(index) # img : list of images, _, (h, w) : original height and width
+    #         for m, img in enumerate(imgs):
+    #             h, w = img.shape[:2]
+    #             if i == 0:
+    #                 # base = img4s[m]
+    #                 # img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+    #                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
+    #                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
+    #             elif i == 1:  # top right
+    #                 x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
+    #                 x1b, y1b, x2b, y2b = 0, h - (y2a - y1a), min(w, x2a - x1a), h
+    #             elif i == 2:  # bottom left
+    #                 x1a, y1a, x2a, y2a = max(xc - w, 0), yc, xc, min(s * 2, yc + h)
+    #                 x1b, y1b, x2b, y2b = w - (x2a - x1a), 0, w, min(y2a - y1a, h)
+    #             elif i == 3:  # bottom right
+    #                 x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
+    #                 x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
+
+    #             img4s[m][y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+    #         padw = x1a - x1b
+    #         padh = y1a - y1b
+
+    #         # Labels
+    #         labels, segments = self.labels[index].copy(), self.segments[index].copy()
+    #         if labels.size:
+    #             # labels[:, 1:3] += labels[:, 3:5] / 2.0      # (x_lefttop, y_lefttop) -> (x_center, y_center)
+    #             labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
+    #             segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
+    #         labels4.append(labels)
+    #         segments4.extend(segments)
+
+    #     # Concat/clip labels
+    #     labels4 = np.concatenate(labels4, 0)
+    #     for x in (labels4[:, 1:], *segments4):
+    #         np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()
+    #     # img4, labels4 = replicate(img4, labels4)  # replicate
+
+    #     # Augment
+    #     img4, labels4, segments4 = copy_paste(img4, labels4, segments4, p=self.hyp["copy_paste"])
+
+    #     img4s, labels4 = multi_random_perspective(
+    #         img4s,
+    #         labels4,
+    #         segments4,
+    #         degrees=self.hyp["degrees"],
+    #         translate=self.hyp["translate"],
+    #         scale=self.hyp["scale"],
+    #         shear=self.hyp["shear"],
+    #         perspective=self.hyp["perspective"],
+    #         border=self.mosaic_border,
+    #     )  # border to remove
+
+
+    #     return img4s, labels4
 
     def load_image(self, i):
         """
